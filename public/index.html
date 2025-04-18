@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>FFmpeg Browser UI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1><span>FFmpeg</span> Browser UI</h1>
+      <p class="subtitle">Convert videos and images with a simple, powerful interface for FFmpeg</p>
+    </header>
+    
+    <div class="card">
+      <h2>Upload Media</h2>
+      <form id="converterForm">
+        <div class="form-group">
+          <label for="video">Select Video or Image File:</label>
+          <input type="file" id="video" name="video" accept="video/*,image/*" required>
+        </div>
+        
+        <div class="form-group">
+          <label for="options">FFmpeg Command Options:</label>
+          <div class="input-group">
+            <input type="text" id="options" name="options" placeholder="-vf scale=1280:720 -c:v libx264 -crf 23">
+            <span class="input-icon">🛠️</span>
+          </div>
+          <button type="button" id="showPresets">Select From Presets</button>
+        </div>
+        
+        <div id="presets" class="presets hidden">
+          <h3>Resolution Presets</h3>
+          <button type="button" data-preset="-vf scale=3840:2160 -c:v libx264 -crf 18 -preset slow">4K Ultra HD</button>
+          <button type="button" data-preset="-vf scale=2560:1440 -c:v libx264 -crf 20 -preset medium">1440p QHD</button>
+          <button type="button" data-preset="-vf scale=1920:1080 -c:v libx264 -crf 23 -preset medium">1080p Full HD</button>
+          <button type="button" data-preset="-vf scale=1280:720 -c:v libx264 -crf 23 -preset fast">720p HD</button>
+          <button type="button" data-preset="-vf scale=854:480 -c:v libx264 -crf 26 -preset fast">480p SD</button>
+          <button type="button" data-preset="-vf scale=640:360 -c:v libx264 -crf 28 -preset veryfast">360p Low</button>
+          
+          <h3>Format Conversion</h3>
+          <button type="button" data-preset="-c:v libx264 -c:a aac -movflags +faststart">MP4 Web Optimized</button>
+          <button type="button" data-preset="-c:v libvpx-vp9 -crf 30 -b:v 0 -c:a libopus -f webm">WebM (VP9)</button>
+          <button type="button" data-preset="-c:v libtheora -q:v 7 -c:a libvorbis -f ogg">OGG Format</button>
+          <button type="button" data-preset="-vf fps=15,scale=320:-1:flags=lanczos -f gif">GIF Animation</button>
+          
+          <h3>Audio Options</h3>
+          <button type="button" data-preset="-vn -c:a aac -b:a 192k">Extract Audio (AAC 192k)</button>
+          <button type="button" data-preset="-vn -c:a libmp3lame -b:a 320k">Extract Audio (MP3 320k)</button>
+          <button type="button" data-preset="-c:v copy -c:a aac -b:a 128k">Keep Video, Convert Audio</button>
+          <button type="button" data-preset="-an">Remove Audio</button>
+          
+          <h3>Image Conversion</h3>
+          <button type="button" data-preset="-q:v 1 output.jpg">JPG (Highest Quality)</button>
+          <button type="button" data-preset="-q:v 5 output.jpg">JPG (Medium Quality)</button>
+          <button type="button" data-preset="-q:v 10 output.jpg">JPG (Low Quality)</button>
+          <button type="button" data-preset="-compression_level 0 output.png">PNG (Lossless)</button>
+          <button type="button" data-preset="-lossless 1 -quality 100 output.webp">WebP (Lossless)</button>
+          <button type="button" data-preset="-lossless 0 -quality 80 output.webp">WebP (Compressed)</button>
+          <button type="button" data-preset="-vf scale=1024:-1 output.jpg">Resize to 1024px Width</button>
+          <button type="button" data-preset="-vf scale=-1:768 output.jpg">Resize to 768px Height</button>
+          
+          <h3>Special Use Cases</h3>
+          <button type="button" data-preset="-vf scale=1280:720 -c:v libx264 -crf 23 -c:a aac -b:a 128k -strict -2 -movflags +faststart -profile:v baseline -level 3.0">Mobile Compatible</button>
+          <button type="button" data-preset="-c:v libx264 -crf 18 -preset veryslow -tune film -c:a aac -b:a 192k">High Quality Archive</button>
+          <button type="button" data-preset="-vf scale=1280:720 -c:v libx264 -b:v 2500k -maxrate 2675k -bufsize 5350k -c:a aac -b:a 128k -ar 48000 -profile:v main -level 3.1">Streaming Optimized</button>
+          <button type="button" data-preset="-vf 'scale=1080:1080:force_original_aspect_ratio=decrease,pad=1080:1080:(ow-iw)/2:(oh-ih)/2' -c:v libx264 -crf 23 -c:a aac -ar 44100">Instagram Square</button>
+          <button type="button" data-preset="-ss 00:00:05 -t 00:00:10">Trim (5s to 15s)</button>
+          <button type="button" data-preset="-vf 'setpts=0.5*PTS' -af 'atempo=2.0'">2x Speed</button>
+        </div>
+        
+        <button type="submit" id="convertBtn">Convert Media</button>
+      </form>
+    </div>
+    
+    <div id="progressCard" class="card hidden">
+      <h2>Processing</h2>
+      <div class="progress-container">
+        <div class="progress-info">
+          <span id="timeInfo">Time: --:--:--</span>
+          <span id="frameInfo">Frame: --</span>
+          <span id="speedInfo">Speed: --x</span>
+        </div>
+        <div class="progress-bar-container">
+          <div id="progressBar" class="progress-bar"></div>
+        </div>
+      </div>
+    </div>
+    
+    <div id="resultCard" class="card hidden">
+      <h2>Result</h2>
+      <div id="resultContent"></div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
