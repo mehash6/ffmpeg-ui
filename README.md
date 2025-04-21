@@ -71,6 +71,9 @@ Alternatively, you can download FFmpeg directly from the [official website](http
 - Support for custom FFmpeg command options
 - Handles video and audio conversions
 - Supports image sequence extraction
+- Batch processing with consistent media type validation
+- Automatic media type detection (image vs video)
+- ZIP download for batch conversions
 
 ## Troubleshooting
 

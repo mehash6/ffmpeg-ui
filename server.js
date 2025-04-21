@@ -5,6 +5,7 @@ const multer = require("multer");
 const path = require("path");
 const { spawn, execSync } = require("child_process");
 const fs = require("fs");
+const archiver = require("archiver");
 
 // Helper function to detect ffmpeg path
 function getFFmpegPath() {
@@ -174,6 +175,137 @@ function parseFFmpegProgress(output) {
   }
   return null;
 }
+
+// Handle batch file conversion
+app.post("/convert-batch", upload.array("video", 100), async (req, res) => {
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ error: "No files uploaded" });
+  }
+
+  const sessionId = Date.now().toString();
+  res.json({ sessionId });
+
+  const { isImage } = req.body;
+  const results = [];
+  const totalFiles = req.files.length;
+
+  // Process files sequentially
+  for (let i = 0; i < totalFiles; i++) {
+    const file = req.files[i];
+    const inputPath = path.join(__dirname, "uploads", file.filename);
+    
+    // Set appropriate output extension based on options
+    let outputExt = ".mp4";
+    if (isImage === "true") {
+      const formatMatch = req.body.options.match(/output\.(jpg|png|webp|gif)/i);
+      if (formatMatch) {
+        outputExt = `.${formatMatch[1]}`;
+      }
+    }
+
+    const outputPath = path.join(
+      __dirname,
+      "public/output",
+      `output_${sessionId}_${i}${outputExt}`
+    );
+
+    // Parse FFmpeg options
+    const options = req.body.options || "";
+    let args = ["-i", inputPath];
+
+    if (options.trim()) {
+      const parsedOptions = options.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+      const cleanedOptions = parsedOptions.map((opt) => {
+        if (opt.match(/output\.(jpg|png|webp|gif)/i)) {
+          return outputPath;
+        }
+        return opt;
+      });
+      args.push(...cleanedOptions);
+    } else {
+      args.push(outputPath);
+    }
+
+    try {
+      await new Promise((resolve, reject) => {
+        const ffmpeg = spawn(FFMPEG_PATH, args);
+        let lastProgress = null;
+
+        ffmpeg.stderr.on("data", (data) => {
+          const output = data.toString();
+          console.log(output);
+          
+          const progress = parseFFmpegProgress(output);
+          if (progress) {
+            lastProgress = progress;
+            io.emit(`batch-progress:${sessionId}`, {
+              currentFile: i + 1,
+              totalFiles,
+              fileName: file.originalname,
+              speed: progress.speed,
+              time: progress.time,
+              frame: progress.frame
+            });
+          }
+        });
+
+        ffmpeg.on("close", (code) => {
+          if (code === 0) {
+            results.push({
+              success: true,
+              outputFile: path.basename(outputPath),
+              originalFile: file.originalname
+            });
+            resolve();
+          } else {
+            results.push({
+              success: false,
+              originalFile: file.originalname,
+              error: `FFmpeg exited with code ${code}`
+            });
+            resolve(); // Continue with next file even if this one failed
+          }
+        });
+
+        ffmpeg.on("error", (err) => {
+          results.push({
+            success: false,
+            originalFile: file.originalname,
+            error: err.message
+          });
+          resolve();
+        });
+      });
+    } catch (error) {
+      results.push({
+        success: false,
+        originalFile: file.originalname,
+        error: error.message
+      });
+    }
+  }
+
+  // Emit completion event
+  io.emit(`batch-complete:${sessionId}`, results);
+  
+  // Create ZIP file if requested
+  app.get(`/download-batch/${sessionId}`, (req, res) => {
+    const archiver = require('archiver');
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    
+    res.attachment(`batch_${sessionId}.zip`);
+    archive.pipe(res);
+    
+    results.forEach((result, index) => {
+      if (result.success) {
+        const outputPath = path.join(__dirname, "public/output", result.outputFile);
+        archive.file(outputPath, { name: result.outputFile });
+      }
+    });
+    
+    archive.finalize();
+  });
+});
 
 // Start server
 const PORT = process.env.PORT || 3000;

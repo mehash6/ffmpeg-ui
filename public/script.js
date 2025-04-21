@@ -291,3 +291,287 @@ converterForm.addEventListener("submit", async (e) => {
 //   }
 // }
 // fetchFFmpegFormats();
+
+// Function to check if all files are images
+function areAllImages(files) {
+  return Array.from(files).every(file => file.type.startsWith("image/"));
+}
+
+// Function to check if all files are videos
+function areAllVideos(files) {
+  return Array.from(files).every(file => file.type.startsWith("video/"));
+}
+
+// Function to check if media types are consistent
+function checkMediaTypeConsistency(files) {
+  if (files.length === 0) return { consistent: false, type: null };
+  if (files.length === 1) {
+    return {
+      consistent: true,
+      type: files[0].type.startsWith("image/") ? "image" : "video"
+    };
+  }
+
+  const isAllImages = areAllImages(files);
+  const isAllVideos = areAllVideos(files);
+
+  return {
+    consistent: isAllImages || isAllVideos,
+    type: isAllImages ? "image" : isAllVideos ? "video" : "mixed"
+  };
+}
+
+// Handle form submission
+converterForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+
+  // Validate input
+  if (!videoInput.files.length) {
+    showError("Please select one or more media files");
+    return;
+  }
+
+  // Check if media types are consistent
+  const mediaTypeCheck = checkMediaTypeConsistency(videoInput.files);
+  if (!mediaTypeCheck.consistent) {
+    showError("Please select either all images or all videos, not mixed types");
+    return;
+  }
+
+  const files = Array.from(videoInput.files);
+  const isBatch = files.length > 1;
+  const isImage = mediaTypeCheck.type === "image";
+
+  // Create form data
+  const formData = new FormData();
+  files.forEach((file, index) => {
+    formData.append("video", file);
+  });
+
+  // Get the options value
+  let options = optionsInput.value;
+
+  // For images, ensure output format is specified if not already
+  if (isImage && !options.includes("output.")) {
+    const formatMatch = options.match(/output\.(jpg|png|webp|gif)/);
+    const outputFormat = formatMatch ? formatMatch[1] : "jpg";
+    if (!options.includes("output.")) {
+      options += ` output.${outputFormat}`;
+    }
+  }
+
+  formData.append("options", options);
+  formData.append("isImage", isImage);
+  formData.append("isBatch", isBatch);
+
+  // Show progress card and hide result card
+  progressCard.classList.remove("hidden");
+  resultCard.classList.add("hidden");
+  progressBar.style.width = "0%";
+
+  // Update progress card for batch processing
+  if (isBatch) {
+    const progressTitle = progressCard.querySelector("h2");
+    progressTitle.textContent = `Processing (${files.length} files)`;
+  }
+
+  // Add button loading state
+  const convertButton = document.getElementById("convertBtn");
+  const originalButtonText = convertButton.innerHTML;
+  convertButton.innerHTML = `Processing${isBatch ? ` ${files.length} files...` : '...'}`;
+  convertButton.disabled = true;
+
+  try {
+    const response = await fetch(isBatch ? "/convert-batch" : "/convert", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || "Server error");
+    }
+
+    const data = await response.json();
+    const sessionId = data.sessionId;
+
+    if (isBatch) {
+      // Handle batch progress
+      let completedFiles = 0;
+      const totalFiles = files.length;
+
+      socket.on(`batch-progress:${sessionId}`, (progress) => {
+        timeInfo.textContent = `File ${progress.currentFile} of ${progress.totalFiles}`;
+        frameInfo.textContent = `Progress: ${progress.fileName}`;
+        speedInfo.textContent = `Speed: ${progress.speed}`;
+
+        const percentComplete = (progress.currentFile / progress.totalFiles) * 100;
+        progressBar.style.width = `${percentComplete}%`;
+        progressCard.classList.add("processing");
+      });
+
+      socket.on(`batch-complete:${sessionId}`, (results) => {
+        progressCard.classList.remove("processing");
+        convertButton.innerHTML = originalButtonText;
+        convertButton.disabled = false;
+
+        // Display batch results
+        const successCount = results.filter(r => r.success).length;
+        const failureCount = results.length - successCount;
+
+        let resultsHTML = `
+          <div class="success-message">Batch processing completed!</div>
+          <p>${successCount} successful, ${failureCount} failed</p>
+          <div class="batch-results">
+        `;
+
+        results.forEach((result, index) => {
+          if (result.success) {
+            resultsHTML += `
+              <div class="batch-item">
+                <span class="batch-filename">${files[index].name}</span>
+                <a href="/output/${result.outputFile}" download class="download-link small">
+                  Download
+                </a>
+              </div>
+            `;
+          } else {
+            resultsHTML += `
+              <div class="batch-item error">
+                <span class="batch-filename">${files[index].name}</span>
+                <span>Failed</span>
+              </div>
+            `;
+          }
+        });
+
+        resultsHTML += `
+          </div>
+          <a href="/download-batch/${sessionId}" class="download-link">
+            Download All (ZIP)
+          </a>
+        `;
+
+        resultContent.innerHTML = resultsHTML;
+        progressCard.classList.add("hidden");
+        resultCard.classList.remove("hidden");
+
+        // Clean up socket listeners
+        socket.off(`batch-progress:${sessionId}`);
+        socket.off(`batch-complete:${sessionId}`);
+      });
+    } else {
+      // Single file processing (existing code)
+      socket.on(`progress:${sessionId}`, (progress) => {
+        timeInfo.textContent = `Time: ${progress.time}`;
+        frameInfo.textContent = `Frame: ${progress.frame}`;
+        speedInfo.textContent = `Speed: ${progress.speed}`;
+
+        const timeParts = progress.time.split(":");
+        const seconds =
+          parseInt(timeParts[0]) * 3600 +
+          parseInt(timeParts[1]) * 60 +
+          parseFloat(timeParts[2]);
+
+        const file = videoInput.files[0];
+        const videoDuration = 100;
+        const percentComplete = Math.min((seconds / videoDuration) * 100, 100);
+        progressBar.style.width = `${percentComplete}%`;
+
+        progressCard.classList.add("processing");
+      });
+
+      socket.on(`complete:${sessionId}`, (result) => {
+        progressCard.classList.remove("processing");
+        convertButton.innerHTML = originalButtonText;
+        convertButton.disabled = false;
+
+        if (result.success) {
+          const fileExt = result.outputFile.split(".").pop().toLowerCase();
+          const isImageOutput = [
+            "jpg",
+            "jpeg",
+            "png",
+            "gif",
+            "webp",
+            "bmp",
+            "tiff",
+          ].includes(fileExt);
+
+          if (isImageOutput) {
+            resultContent.innerHTML = `
+              <div class="success-message">Image conversion completed successfully!</div>
+              <img src="/output/${result.outputFile}" style="max-width: 100%; max-height: 500px;">
+              <a href="/output/${result.outputFile}" download class="download-link">
+                Download Converted Image
+              </a>
+            `;
+          } else {
+            resultContent.innerHTML = `
+              <div class="success-message">Conversion completed successfully!</div>
+              <video controls>
+                <source src="/output/${result.outputFile}" type="video/mp4">
+                Your browser does not support the video tag.
+              </video>
+              <a href="/output/${result.outputFile}" download class="download-link">
+                Download Converted File
+              </a>
+            `;
+          }
+        } else {
+          resultContent.innerHTML = `
+            <p class="error">Conversion failed. Please check your FFmpeg options and try again.</p>
+          `;
+        }
+
+        progressCard.classList.add("hidden");
+        resultCard.classList.remove("hidden");
+
+        socket.off(`progress:${sessionId}`);
+        socket.off(`complete:${sessionId}`);
+      });
+    }
+  } catch (error) {
+    convertButton.innerHTML = originalButtonText;
+    convertButton.disabled = false;
+    showError(error.message);
+  }
+});
+
+// Display selected file information
+videoInput.addEventListener("change", (e) => {
+  if (e.target.files.length) {
+    const fileInfo = document.createElement("div");
+    fileInfo.className = "file-info";
+    
+    if (e.target.files.length === 1) {
+      const fileName = e.target.files[0].name;
+      const fileSize = formatFileSize(e.target.files[0].size);
+      fileInfo.innerHTML = `
+        <span class="file-name">📁 ${fileName}</span>
+        <span class="file-size">${fileSize}</span>
+      `;
+    } else {
+      // Multiple files selected
+      const totalSize = Array.from(e.target.files).reduce((sum, file) => sum + file.size, 0);
+      const mediaTypeCheck = checkMediaTypeConsistency(e.target.files);
+      const fileType = mediaTypeCheck.consistent ? 
+        (mediaTypeCheck.type === "image" ? "images" : "videos") : 
+        "mixed types";
+      
+      fileInfo.innerHTML = `
+        <span class="file-name">📁 ${e.target.files.length} files (${fileType})</span>
+        <span class="file-size">${formatFileSize(totalSize)}</span>
+      `;
+    }
+
+    // Remove existing file info if present
+    const existingInfo = document.querySelector(".file-info");
+    if (existingInfo) {
+      existingInfo.remove();
+    }
+
+    // Add after the input
+    videoInput.parentNode.appendChild(fileInfo);
+  }
+});

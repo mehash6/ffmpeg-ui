@@ -552,3 +552,77 @@ video, img {
     background-color: rgba(230, 57, 70, 0.2);
   }
 }
+
+/* Animation for card appearance */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+#progressCard, #resultCard {
+  animation: fadeInUp 0.4s ease-out;
+}
+
+/* Batch processing styles */
+.batch-results {
+  margin: 20px 0;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--border-radius);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.batch-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 15px;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.batch-item:last-child {
+  border-bottom: none;
+}
+
+.batch-item.error {
+  background-color: rgba(255, 82, 82, 0.1);
+}
+
+.batch-item.error span:last-child {
+  color: var(--danger);
+}
+
+.batch-filename {
+  font-weight: 500;
+  flex: 1;
+  margin-right: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.download-link.small {
+  padding: 6px 12px;
+  font-size: 0.9rem;
+}
+
+/* Dark mode batch styles */
+@media (prefers-color-scheme: dark) {
+  .batch-results {
+    border-color: #4b5563;
+  }
+  
+  .batch-item {
+    border-bottom-color: #323f52;
+  }
+  
+  .batch-item.error {
+    background-color: rgba(230, 57, 70, 0.2);
+  }
+}
